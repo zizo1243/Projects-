@@ -1,0 +1,116 @@
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_CREATE_TOPICS: "55_10227_Topic:1:1"
+    ports:
+      - "9092:9092"
+  app:
+    build: .
+    container_name: etl_app
+    depends_on:
+      - postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123456
+      POSTGRES_DB: data_project_final_one
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+    volumes:
+      - .:/app
+    command: ["python", "milestone1.py"]
+    restart: on-failure
+
+
+  postgres:
+    image: postgres:15
+    container_name: postgres_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123456
+      POSTGRES_DB: data_project_final_one
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin_ui
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ziadMO@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin123456
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    restart: always
+
+  spark-master:
+    image: quay.io/jupyter/pyspark-notebook:2024-10-14
+    container_name: spark-master
+    command: >
+      bash -c "
+        mkdir -p /tmp/spark-logs &&
+        /usr/local/spark/sbin/start-master.sh &&
+        tail -f /tmp/spark-logs/* || tail -f /dev/null
+      "
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    environment:
+      - SPARK_NO_DAEMONIZE=true
+      - SPARK_LOG_DIR=/tmp/spark-logs
+      - SPARK_MASTER_HOST=spark-master
+      - SPARK_MASTER_PORT=7077
+      - SPARK_MASTER_WEBUI_PORT=8080
+    volumes:
+    - ./:/app
+  spark-worker:
+    image: quay.io/jupyter/pyspark-notebook:2024-10-14
+    container_name: spark-worker
+    command: >
+      bash -c "
+        mkdir -p /tmp/spark-logs /tmp/spark-work &&
+        /usr/local/spark/sbin/start-worker.sh spark://spark-master:7077 &&
+        tail -f /tmp/spark-logs/* || tail -f /dev/null
+      "
+    depends_on:
+      - spark-master
+    ports:
+      - "8081:8081"
+    environment:
+      - SPARK_NO_DAEMONIZE=true
+      - SPARK_LOG_DIR=/tmp/spark-logs
+      - SPARK_WORKER_DIR=/tmp/spark-work
+      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_MEMORY=2g
+      - SPARK_WORKER_WEBUI_PORT=8081
+      - SPARK_MASTER=spark://spark-master:7077
+    volumes:
+      - ./:/app
+
+
+volumes:
+  postgres_data:
+  pgadmin_data:
